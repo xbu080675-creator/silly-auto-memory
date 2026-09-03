@@ -6,7 +6,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "OpenAI + 用户",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "minimum_client_version": "1.18.0",
   "generate_interceptor": "sillyAutoMemoryInterceptor",
   "hooks": {
