@@ -10,9 +10,16 @@ mkdir -p "$APP"
 echo "正在下载 Auto Memory Termux 后端更新..."
 curl -fsSL "$RAW" -o "$TMP"
 
-if ! node --check "$TMP" >/dev/null 2>&1; then
-  echo "下载的 server.js 语法检查失败，已取消更新。"
-  rm -f "$TMP"
+if ! command -v node >/dev/null 2>&1; then
+  echo "未检测到 Node.js，正在安装..."
+  pkg install nodejs -y
+fi
+
+echo "正在检查下载文件..."
+if ! node --check "$TMP"; then
+  echo
+  echo "server.js 语法检查失败，文件保留在：$TMP"
+  echo "请把上面的具体报错发给我。旧后端没有被替换。"
   exit 1
 fi
 
