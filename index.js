@@ -1,7 +1,7 @@
 const MODULE = 'silly_auto_memory';
 const PROMPT_ID = 'silly_auto_memory_recall';
 const META_LAST_SOURCE = 'silly_auto_memory_last_source';
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 
 const DEFAULTS = Object.freeze({
     enabled: true,
@@ -209,33 +209,73 @@ globalThis.sillyAutoMemoryInterceptor = async function (chat, contextSize, abort
     }
 };
 
-async function quietGenerate(prompt) {
+async function modelExtract(prompt) {
     const c = ctx();
+    const responseLength = Number(settings().extractionResponseTokens) || 1400;
+    const systemPrompt = [
+        'You are a machine data-extraction engine, not a roleplay character.',
+        'Ignore character/persona/style instructions from the chat.',
+        'Follow the extraction task in the user prompt.',
+        'Return ONLY one valid JSON object. No prose, no markdown, no code fences.',
+        'The JSON root must be {"memories":[...]}.',
+    ].join(' ');
+
+    // Prefer raw generation so the extractor is isolated from the active roleplay persona.
+    if (typeof c?.generateRaw === 'function') {
+        try {
+            return await c.generateRaw({ prompt, systemPrompt, responseLength });
+        } catch (rawError) {
+            log('context.generateRaw failed, falling back to quiet generation', rawError);
+        }
+    }
+
     if (typeof c?.generateQuietPrompt === 'function') {
         try {
             return await c.generateQuietPrompt({
-                quietPrompt: prompt,
-                responseLength: Number(settings().extractionResponseTokens) || 1400,
+                quietPrompt: systemPrompt + '\n\n' + prompt,
+                skipWIAN: true,
+                responseLength,
             });
-        } catch (firstError) {
-            log('context.generateQuietPrompt object form failed, trying module fallback', firstError);
+        } catch (quietError) {
+            log('context.generateQuietPrompt failed, trying module fallback', quietError);
         }
     }
 
     const script = await import('/script.js');
+    if (typeof script.generateRaw === 'function') {
+        try {
+            return await script.generateRaw({ prompt, systemPrompt, responseLength });
+        } catch (rawError) {
+            log('module generateRaw failed, trying quiet fallback', rawError);
+        }
+    }
+
     if (typeof script.generateQuietPrompt !== 'function') {
-        throw new Error('generateQuietPrompt is unavailable in this SillyTavern build');
+        throw new Error('No compatible generation function is available in this SillyTavern build');
     }
     return await script.generateQuietPrompt({
-        quietPrompt: prompt,
-        responseLength: Number(settings().extractionResponseTokens) || 1400,
+        quietPrompt: systemPrompt + '\n\n' + prompt,
+        skipWIAN: true,
+        responseLength,
     });
 }
 
 function parseJsonObject(raw) {
+    if (raw && typeof raw === 'object') {
+        if (Array.isArray(raw)) return { memories: raw };
+        if (Array.isArray(raw.memories)) return raw;
+        if (typeof raw.content === 'string') raw = raw.content;
+        else if (typeof raw.text === 'string') raw = raw.text;
+        else if (typeof raw.message === 'string') raw = raw.message;
+    }
     if (typeof raw !== 'string') throw new Error('Extractor returned non-text output');
-    let text = raw.trim();
-    text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+    let text = raw
+        .replace(/<think>[\s\S]*?<\/think>/gi, '')
+        .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, '')
+        .trim();
+
+    text = text.replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/i, '').trim();
 
     try {
         const parsed = JSON.parse(text);
@@ -246,17 +286,23 @@ function parseJsonObject(raw) {
     const firstObj = text.indexOf('{');
     const lastObj = text.lastIndexOf('}');
     if (firstObj >= 0 && lastObj > firstObj) {
-        const parsed = JSON.parse(text.slice(firstObj, lastObj + 1));
-        if (Array.isArray(parsed)) return { memories: parsed };
-        return parsed;
+        try {
+            const parsed = JSON.parse(text.slice(firstObj, lastObj + 1));
+            if (Array.isArray(parsed)) return { memories: parsed };
+            return parsed;
+        } catch {}
     }
 
     const firstArr = text.indexOf('[');
     const lastArr = text.lastIndexOf(']');
     if (firstArr >= 0 && lastArr > firstArr) {
-        return { memories: JSON.parse(text.slice(firstArr, lastArr + 1)) };
+        try {
+            return { memories: JSON.parse(text.slice(firstArr, lastArr + 1)) };
+        } catch {}
     }
-    throw new Error('No JSON object found in extractor output');
+
+    const preview = text.replace(/\s+/g, ' ').slice(0, 180);
+    throw new Error(`No JSON object found. Model output: ${preview || '(empty)'}`);
 }
 
 function buildExtractionPrompt(contextText, targetText, characterName, userName) {
@@ -382,8 +428,23 @@ async function extractLatestTurn({ force = false } = {}) {
     extractionInFlight = true;
     updateStatus('extracting…');
     try {
-        const raw = await quietGenerate(buildExtractionPrompt(contextText, targetText, cName, uName));
-        const parsed = parseJsonObject(raw);
+        const extractionPrompt = buildExtractionPrompt(contextText, targetText, cName, uName);
+        let raw = await modelExtract(extractionPrompt);
+        let parsed;
+        try {
+            parsed = parseJsonObject(raw);
+        } catch (firstParseError) {
+            const repairPrompt = [
+                'Convert the following failed extractor output into the required strict JSON object.',
+                'Return ONLY {"memories":[...]} and nothing else.',
+                'If the text contains no durable memory, return {"memories":[]}.',
+                '',
+                String(raw || '').slice(0, 8000),
+            ].join('\n');
+            log('repairing malformed extractor output', raw);
+            raw = await modelExtract(repairPrompt);
+            parsed = parseJsonObject(raw);
+        }
         const scopes = scopeKeys();
         const memories = (parsed.memories || [])
             .map(m => canonicalCandidate(m, scopes))
