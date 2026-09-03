@@ -1,7 +1,7 @@
 const MODULE = 'silly_auto_memory';
 const PROMPT_ID = 'silly_auto_memory_recall';
 const META_LAST_SOURCE = 'silly_auto_memory_last_source';
-const VERSION = '0.1.4';
+const VERSION = '0.1.5';
 
 const DEFAULTS = Object.freeze({
     enabled: true,
@@ -140,13 +140,33 @@ function cleanForMemory(text, max = 4000) {
 }
 
 function recentQueryFrom(chat) {
-    const count = Math.max(2, Number(settings().queryMessages) || 6);
-    return chat
-        .slice(-count)
-        .filter(m => !m?.is_system)
-        .map(m => `${getMessageRole(m)}: ${cleanForMemory(getMessageText(m), 1800)}`)
-        .filter(Boolean)
-        .join('\n');
+    const usable = chat.filter(m => !m?.is_system && getMessageText(m));
+    let latestUser = -1;
+    for (let i = usable.length - 1; i >= 0; i--) {
+        if (usable[i]?.is_user) {
+            latestUser = i;
+            break;
+        }
+    }
+    if (latestUser < 0) return '';
+
+    const current = cleanForMemory(getMessageText(usable[latestUser]), 2200);
+    if (!current) return '';
+
+    // 召回应以“用户刚刚问了什么”为核心。旧版把最近 6 条完整消息混在一起，
+    // 很容易被上一轮角色回复里的词带偏。
+    const needsContext = current.length < 14 || /^(那|这|然后|后来|之后|所以|她|他|它|他们|她们|这个|那个|这种|那种|怎么|为什么|呢|还有)/.test(current);
+    if (!needsContext) return current;
+
+    const context = [];
+    const maxPrevious = Math.max(1, Math.min(3, Number(settings().queryMessages) || 2));
+    for (let i = latestUser - 1; i >= 0 && context.length < maxPrevious; i--) {
+        const text = cleanForMemory(getMessageText(usable[i]), 900);
+        if (!text) continue;
+        context.unshift(`${getMessageRole(usable[i])}：${text}`);
+    }
+
+    return [`当前用户消息：${current}`, ...context].join('\n');
 }
 
 function formatMemoryPrompt(memories) {
@@ -528,11 +548,13 @@ function renderRecallDebug() {
 
     const time = new Date(lastRecallAt).toLocaleTimeString();
     const count = lastRecallMemories.length;
-    const items = lastRecallMemories.slice(0, 8).map((m, i) =>
-        '<div class="sam-recall-item">' +
-        '<b>' + (i + 1) + '.</b> ' + escapeHtml(m.summary || '') +
-        '</div>'
-    ).join('');
+    const items = lastRecallMemories.slice(0, 8).map((m, i) => {
+        const score = Number.isFinite(Number(m.score)) ? ' · 相关度 ' + Number(m.score).toFixed(2) : '';
+        return '<div class="sam-recall-item">' +
+            '<b>' + (i + 1) + '.</b> ' + escapeHtml(m.summary || '') +
+            '<span class="sam-recall-score">' + score + '</span>' +
+            '</div>';
+    }).join('');
 
     box.innerHTML =
         '<div class="sam-recall-title">最近一次召回：' + count + ' 条 · ' + time + '</div>' +
