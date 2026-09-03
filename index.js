@@ -1,7 +1,7 @@
 const MODULE = 'silly_auto_memory';
 const PROMPT_ID = 'silly_auto_memory_recall';
 const META_LAST_SOURCE = 'silly_auto_memory_last_source';
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 
 const DEFAULTS = Object.freeze({
     enabled: true,
@@ -20,6 +20,9 @@ const DEFAULTS = Object.freeze({
 let extractionInFlight = false;
 let extractionTimer = null;
 let initialized = false;
+let lastRecallMemories = [];
+let lastRecallQuery = '';
+let lastRecallAt = null;
 
 function ctx() {
     return globalThis.SillyTavern?.getContext?.();
@@ -201,7 +204,12 @@ globalThis.sillyAutoMemoryInterceptor = async function (chat, contextSize, abort
             timeoutMs: 2200,
         });
 
-        const prompt = formatMemoryPrompt(result.memories || []);
+        lastRecallMemories = Array.isArray(result.memories) ? result.memories : [];
+        lastRecallQuery = query;
+        lastRecallAt = Date.now();
+        renderRecallDebug();
+
+        const prompt = formatMemoryPrompt(lastRecallMemories);
         const c = ctx();
         if (c?.setExtensionPrompt) {
             await c.setExtensionPrompt(
@@ -213,8 +221,11 @@ globalThis.sillyAutoMemoryInterceptor = async function (chat, contextSize, abort
                 0,
             );
         }
-        log(`召回 ${result.memories?.length || 0} 条记忆`, result.memories);
+        log(`召回 ${lastRecallMemories.length} 条记忆`, lastRecallMemories);
     } catch (e) {
+        lastRecallMemories = [];
+        lastRecallAt = Date.now();
+        renderRecallDebug();
         log('记忆召回失败', e);
         await clearInjectedMemory();
     }
@@ -506,6 +517,28 @@ function updateStatus(text) {
     if (el) el.textContent = text;
 }
 
+function renderRecallDebug() {
+    const box = document.getElementById('sam_recall_debug');
+    if (!box) return;
+
+    if (!lastRecallAt) {
+        box.innerHTML = '<div class="sam-empty">还没有执行过记忆召回。</div>';
+        return;
+    }
+
+    const time = new Date(lastRecallAt).toLocaleTimeString();
+    const count = lastRecallMemories.length;
+    const items = lastRecallMemories.slice(0, 8).map((m, i) =>
+        '<div class="sam-recall-item">' +
+        '<b>' + (i + 1) + '.</b> ' + escapeHtml(m.summary || '') +
+        '</div>'
+    ).join('');
+
+    box.innerHTML =
+        '<div class="sam-recall-title">最近一次召回：' + count + ' 条 · ' + time + '</div>' +
+        (count ? items : '<div class="sam-empty">本轮没有找到达到相关度阈值的记忆。</div>');
+}
+
 async function testBackend() {
     updateStatus('正在测试 Termux 后端…');
     try {
@@ -556,7 +589,7 @@ async function refreshMemoryList() {
             main.className = 'sam-memory-main';
             const meta = document.createElement('div');
             meta.className = 'sam-memory-meta';
-            meta.textContent = `${memoryTypeLabel(m.type)} · 重要度 ${m.importance} · 命中 ${m.mentions ?? 1} 次`;
+            meta.textContent = `${memoryTypeLabel(m.type)} · 重要度 ${m.importance} · 累计记录 ${m.mentions ?? 1} 次`;
             const summary = document.createElement('div');
             summary.className = 'sam-memory-summary';
             summary.textContent = m.summary;
@@ -646,6 +679,10 @@ function mountUi() {
           </div>
 
           <div id="sam_status" class="sam-status">尚未检测</div>
+          <div class="sam-recall-panel">
+            <div class="sam-recall-heading">召回调试</div>
+            <div id="sam_recall_debug" class="sam-recall-debug"><div class="sam-empty">还没有执行过记忆召回。</div></div>
+          </div>
           <div id="sam_memory_list" class="sam-memory-list"></div>
         </div>
       </div>`;
@@ -672,6 +709,7 @@ function mountUi() {
     setTimeout(() => {
         testBackend();
         refreshMemoryList();
+        renderRecallDebug();
     }, 500);
 }
 
