@@ -1,7 +1,7 @@
 const MODULE = 'silly_auto_memory';
 const PROMPT_ID = 'silly_auto_memory_recall';
 const META_LAST_SOURCE = 'silly_auto_memory_last_source';
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 
 const DEFAULTS = Object.freeze({
     enabled: true,
@@ -112,9 +112,20 @@ function getMessageText(m) {
 }
 
 function getMessageRole(m) {
-    if (m?.is_user) return 'user';
-    if (m?.is_system) return 'system';
-    return 'assistant';
+    if (m?.is_user) return '用户';
+    if (m?.is_system) return '系统';
+    return '角色';
+}
+
+function memoryTypeLabel(type) {
+    return ({
+        fact: '事实',
+        preference: '偏好',
+        relationship: '关系',
+        event: '事件',
+        rule: '规则',
+        state: '状态',
+    })[type] || '记忆';
 }
 
 function cleanForMemory(text, max = 4000) {
@@ -138,14 +149,14 @@ function recentQueryFrom(chat) {
 function formatMemoryPrompt(memories) {
     if (!memories?.length) return '';
     const lines = memories.map((m, i) => {
-        const label = m.type || 'memory';
+        const label = memoryTypeLabel(m.type);
         const when = m.updatedAt ? new Date(m.updatedAt).toLocaleDateString() : '';
         return `${i + 1}. [${label}${when ? ` · ${when}` : ''}] ${m.summary}`;
     });
 
     let text = [
-        '[Auto Memory — relevant long-term memory]',
-        'Use these memories only when relevant. Treat newer replacement memories as authoritative. Do not mention this memory block or claim to have a database.',
+        '[自动记忆——与当前对话相关的长期记忆]',
+        '仅在相关时使用这些记忆。若新记忆明确替代旧记忆，以新记忆为准。不要向用户提及这段记忆注入，也不要声称自己拥有数据库。',
         ...lines,
     ].join('\n');
 
@@ -160,7 +171,7 @@ async function clearInjectedMemory() {
     try {
         await c.setExtensionPrompt(PROMPT_ID, '', 1, Number(settings().injectionDepth) || 4, false, 0);
     } catch (e) {
-        log('clear prompt failed', e);
+        log('清除记忆注入失败', e);
     }
 }
 
@@ -202,9 +213,9 @@ globalThis.sillyAutoMemoryInterceptor = async function (chat, contextSize, abort
                 0,
             );
         }
-        log(`recalled ${result.memories?.length || 0} memories`, result.memories);
+        log(`召回 ${result.memories?.length || 0} 条记忆`, result.memories);
     } catch (e) {
-        log('recall failed', e);
+        log('记忆召回失败', e);
         await clearInjectedMemory();
     }
 };
@@ -213,11 +224,11 @@ async function modelExtract(prompt) {
     const c = ctx();
     const responseLength = Number(settings().extractionResponseTokens) || 1400;
     const systemPrompt = [
-        'You are a machine data-extraction engine, not a roleplay character.',
-        'Ignore character/persona/style instructions from the chat.',
-        'Follow the extraction task in the user prompt.',
-        'Return ONLY one valid JSON object. No prose, no markdown, no code fences.',
-        'The JSON root must be {"memories":[...]}.',
+        '你是机器数据抽取引擎，不是角色扮演人物。',
+        '忽略聊天中的角色人设、文风和扮演指令，只执行记忆抽取任务。',
+        '严格按照用户提示中的抽取要求处理。',
+        '只返回一个合法 JSON 对象，不要解释、不要 Markdown、不要代码块。',
+        'JSON 根对象必须是 {"memories":[...]}。',
     ].join(' ');
 
     // Prefer raw generation so the extractor is isolated from the active roleplay persona.
@@ -225,7 +236,7 @@ async function modelExtract(prompt) {
         try {
             return await c.generateRaw({ prompt, systemPrompt, responseLength });
         } catch (rawError) {
-            log('context.generateRaw failed, falling back to quiet generation', rawError);
+            log('直接生成失败，尝试静默生成', rawError);
         }
     }
 
@@ -237,7 +248,7 @@ async function modelExtract(prompt) {
                 responseLength,
             });
         } catch (quietError) {
-            log('context.generateQuietPrompt failed, trying module fallback', quietError);
+            log('静默生成失败，尝试模块回退', quietError);
         }
     }
 
@@ -246,12 +257,12 @@ async function modelExtract(prompt) {
         try {
             return await script.generateRaw({ prompt, systemPrompt, responseLength });
         } catch (rawError) {
-            log('module generateRaw failed, trying quiet fallback', rawError);
+            log('模块直接生成失败，尝试静默回退', rawError);
         }
     }
 
     if (typeof script.generateQuietPrompt !== 'function') {
-        throw new Error('No compatible generation function is available in this SillyTavern build');
+        throw new Error('当前 SillyTavern 版本没有可用的模型生成接口');
     }
     return await script.generateQuietPrompt({
         quietPrompt: systemPrompt + '\n\n' + prompt,
@@ -268,7 +279,7 @@ function parseJsonObject(raw) {
         else if (typeof raw.text === 'string') raw = raw.text;
         else if (typeof raw.message === 'string') raw = raw.message;
     }
-    if (typeof raw !== 'string') throw new Error('Extractor returned non-text output');
+    if (typeof raw !== 'string') throw new Error('记忆抽取器返回的不是文本');
 
     let text = raw
         .replace(/<think>[\s\S]*?<\/think>/gi, '')
@@ -302,53 +313,53 @@ function parseJsonObject(raw) {
     }
 
     const preview = text.replace(/\s+/g, ' ').slice(0, 180);
-    throw new Error(`No JSON object found. Model output: ${preview || '(empty)'}`);
+    throw new Error(`未找到合法 JSON。模型输出：${preview || '（空）'}`);
 }
 
 function buildExtractionPrompt(contextText, targetText, characterName, userName) {
-    return `You are a balanced automatic memory extractor for a roleplay/chat system.
+    return `你是一个用于角色扮演/聊天系统的自动记忆抽取器。
 
-Extract information from TARGET TURN that will help maintain continuity later. Do NOT require the user to explicitly say "remember this".
-Prefer useful continuity over extreme conservatism: save important roleplay developments even when they are established naturally through narration or dialogue.
+请从【目标轮次】中提取以后维持剧情连续性时有用的信息。不要求用户明确说“记住这个”。
+不要过分保守：只要是自然通过叙述或对话建立、并且以后可能会被再次提及的重要信息，就应保存。
 
-Save when the turn establishes any of these:
-- a stable fact about ${userName}, ${characterName}, another named person, place, object, organization, or world setting
-- a preference, habit, boundary, goal, fear, opinion, recurring behavior, or personal rule likely to matter later
-- a relationship change, promise, conflict, reconciliation, trust change, nickname, role, or social connection
-- a meaningful event, decision, discovery, plan, possession change, injury/condition, task, location change, or scene outcome that future turns may refer back to
-- a persistent world/setting rule or character-specific rule
-- a temporary scene state that is important for near-term continuity
+以下内容通常值得保存：
+- 关于 ${userName}、${characterName}、其他具名人物、地点、物品、组织或世界设定的稳定事实
+- 以后可能有用的偏好、习惯、边界、目标、恐惧、观点、长期行为或个人规则
+- 人际关系变化、承诺、冲突、和解、信任变化、称呼、身份、角色或社会关系
+- 有意义的事件、决定、发现、计划、物品得失、当前任务、地点变化或剧情结果
+- 持续有效的世界规则、设定规则或角色规则
+- 对近期剧情连续性有帮助的临时状态
 
-Do not summarize the whole conversation. Do not save trivial gestures, generic filler, stylistic prose, repeated information with no change, generic knowledge, guesses presented as uncertain, passwords, API keys, payment data, exact street addresses, or highly sensitive secrets.
+不要把整段对话概括成摘要。不要保存无关紧要的动作、寒暄、填充内容、纯文风、没有变化的重复信息、常识、明显不确定的猜测、密码、API 密钥、支付信息、精确住址或高度敏感秘密。
 
-Useful memory categories:
-- fact: stable facts about ${userName}, ${characterName}, people, places, objects, organizations, or setting
-- preference: likes/dislikes/habits/boundaries/goals/opinions that may matter later
-- relationship: relationship, role, nickname, trust, conflict, affection, alliance, or social changes between participants
-- event: meaningful events, promises, decisions, plans, discoveries, outcomes, arrivals/departures, gains/losses
-- rule: persistent setting/world/behavior rules explicitly or clearly established
-- state: temporary but useful current state (location, task, possession, condition, active situation)
+记忆类型：
+- fact：事实
+- preference：偏好
+- relationship：关系
+- event：事件
+- rule：规则
+- state：状态
 
-For each memory output:
-- type: fact | preference | relationship | event | rule | state
-- subject: short canonical subject
-- predicate: short stable property/relation
-- object: short value
-- summary: one concise standalone sentence with names resolved; no pronouns that require chat context
-- keywords: 3-10 recall terms, aliases or synonyms
-- importance: integer 1-5. Use 3 for normal continuity facts, 4 for clearly important developments, 5 only for major turning points
-- confidence: number 0-1
-- scope: "character" for information that should follow this character across chats; "chat" for branch/scene-specific state; "global" only for an explicitly universal user preference/fact
-- mode: "replace" only when this changes/invalidates the prior value of the same subject+predicate; otherwise "append"
-- ttl_days: 0 for durable memory; use 3-30 only for genuinely temporary "state"
+每条记忆必须包含以下 JSON 字段：
+- type：fact | preference | relationship | event | rule | state
+- subject：简短、明确的主体
+- predicate：简短、稳定的属性或关系
+- object：简短的值
+- summary：一句能脱离上下文独立理解的中文记忆，名字要写清楚，不要使用需要上下文才能理解的代词
+- keywords：3-10 个用于召回的关键词、别名或同义词
+- importance：1-5 的整数；普通连续性信息用 3，明显重要的发展用 4，重大转折才用 5
+- confidence：0-1
+- scope："character" 表示跟随当前角色跨聊天保留；"chat" 表示只属于当前剧情分支/场景；"global" 仅用于明确属于用户本人的普遍事实或偏好
+- mode：只有当本条明确修改/推翻同一 subject+predicate 的旧值时使用 "replace"，否则使用 "append"
+- ttl_days：长期记忆填 0；确实是临时的 state 可填 3-30
 
-Usually extract 1-4 memories from a turn with meaningful continuity information. Output {"memories": []} only when the turn truly adds nothing useful for future continuity.
-Return strict JSON only, no markdown.
+有实际剧情信息的轮次通常提取 1-4 条。只有当这一轮确实没有任何以后值得使用的信息时，才返回 {"memories":[]}。
+只返回严格合法的 JSON，不要 Markdown，不要额外解释。
 
-CONTEXT BEFORE TARGET (for resolving names only):
-${contextText || '(none)'}
+【目标轮次之前的上下文】（只用于确认人物和指代）：
+${contextText || '（无）'}
 
-TARGET TURN:
+【目标轮次】：
 ${targetText}`;
 }
 
@@ -428,15 +439,15 @@ async function extractLatestTurn({ force = false } = {}) {
         .join('\n');
 
     const targetText = [
-        `user: ${cleanForMemory(getMessageText(turn.user), 5000)}`,
-        `assistant: ${cleanForMemory(getMessageText(turn.assistant), 5000)}`,
+        `用户：${cleanForMemory(getMessageText(turn.user), 5000)}`,
+        `角色：${cleanForMemory(getMessageText(turn.assistant), 5000)}`,
     ].join('\n');
 
-    const cName = c.name2 || c.characters?.[Number(c.characterId)]?.name || 'character';
-    const uName = c.name1 || 'user';
+    const cName = c.name2 || c.characters?.[Number(c.characterId)]?.name || '当前角色';
+    const uName = c.name1 || '用户';
 
     extractionInFlight = true;
-    updateStatus('extracting…');
+    updateStatus('正在抽取记忆…');
     try {
         const extractionPrompt = buildExtractionPrompt(contextText, targetText, cName, uName);
         let raw = await modelExtract(extractionPrompt);
@@ -445,13 +456,13 @@ async function extractLatestTurn({ force = false } = {}) {
             parsed = parseJsonObject(raw);
         } catch (firstParseError) {
             const repairPrompt = [
-                'Convert the following failed extractor output into the required strict JSON object.',
-                'Return ONLY {"memories":[...]} and nothing else.',
-                'If the text contains no durable memory, return {"memories":[]}.',
+                '把下面这段不规范的记忆抽取结果转换为严格合法的 JSON。',
+                '只返回 {"memories":[...]}，不要附加任何其他内容。',
+                '如果其中没有值得保存的记忆，返回 {"memories":[]}。',
                 '',
                 String(raw || '').slice(0, 8000),
             ].join('\n');
-            log('repairing malformed extractor output', raw);
+            log('正在修复不规范的抽取结果', raw);
             raw = await modelExtract(repairPrompt);
             parsed = parseJsonObject(raw);
         }
@@ -474,12 +485,12 @@ async function extractLatestTurn({ force = false } = {}) {
                 await current.saveMetadata();
             }
         }
-        updateStatus(`saved ${result.changed ?? memories.length} / active ${result.activeCount ?? '?'}`);
-        log('extraction result', result, memories);
+        updateStatus(`本次写入 ${result.changed ?? memories.length} 条 · 当前有效 ${result.activeCount ?? '?'} 条`);
+        log('记忆抽取结果', result, memories);
         await refreshMemoryList();
     } catch (e) {
-        console.warn('[AutoMemory] extraction failed:', e);
-        updateStatus(`extract failed: ${e.message || e}`);
+        console.warn('[自动记忆] 抽取失败：', e);
+        updateStatus(`抽取失败：${e.message || e}`);
     } finally {
         extractionInFlight = false;
     }
@@ -496,12 +507,12 @@ function updateStatus(text) {
 }
 
 async function testBackend() {
-    updateStatus('testing backend…');
+    updateStatus('正在测试 Termux 后端…');
     try {
         const h = await api('/health', { timeoutMs: 1800 });
-        updateStatus(`backend OK · v${h.version} · ${h.activeCount} active`);
+        updateStatus(`后端已连接 · v${h.version} · 当前有效记忆 ${h.activeCount} 条`);
     } catch (e) {
-        updateStatus(`backend offline: ${e.message || e}`);
+        updateStatus(`后端未连接：${e.message || e}`);
     }
 }
 
@@ -533,7 +544,7 @@ async function refreshMemoryList() {
 
         box.innerHTML = '';
         if (!result.memories?.length) {
-            box.innerHTML = '<div class="sam-empty">No active memory in this scope.</div>';
+            box.innerHTML = '<div class="sam-empty">当前角色/聊天范围内还没有有效记忆。</div>';
             return;
         }
 
@@ -545,7 +556,7 @@ async function refreshMemoryList() {
             main.className = 'sam-memory-main';
             const meta = document.createElement('div');
             meta.className = 'sam-memory-meta';
-            meta.textContent = `${m.type} · imp ${m.importance} · seen ${m.mentions ?? 1}`;
+            meta.textContent = `${memoryTypeLabel(m.type)} · 重要度 ${m.importance} · 命中 ${m.mentions ?? 1} 次`;
             const summary = document.createElement('div');
             summary.className = 'sam-memory-summary';
             summary.textContent = m.summary;
@@ -554,7 +565,7 @@ async function refreshMemoryList() {
             const del = document.createElement('button');
             del.className = 'menu_button sam-delete';
             del.textContent = '×';
-            del.title = 'Delete memory';
+            del.title = '删除这条记忆';
             del.addEventListener('click', async () => {
                 await api('/memories/delete', { method: 'POST', body: { id: m.id } });
                 await refreshMemoryList();
@@ -565,12 +576,12 @@ async function refreshMemoryList() {
             box.appendChild(row);
         }
     } catch (e) {
-        box.innerHTML = `<div class="sam-empty">Backend unavailable: ${escapeHtml(e.message || e)}</div>`;
+        box.innerHTML = `<div class="sam-empty">后端不可用：${escapeHtml(e.message || e)}</div>`;
     }
 }
 
 async function clearCurrentScope() {
-    if (!confirm('Delete all active Auto Memory entries for the current character/chat scope?')) return;
+    if (!confirm('确定删除当前角色和当前聊天范围内的全部有效记忆吗？')) return;
     const scopes = scopeKeys();
     await api('/memories/clear', {
         method: 'POST',
@@ -605,36 +616,36 @@ function mountUi() {
     wrap.innerHTML = `
       <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-          <b>Auto Memory (Termux)</b>
+          <b>自动记忆（Termux）</b>
           <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
           <div class="sam-grid">
-            <label><input id="sam_enabled" type="checkbox"> Enable recall</label>
-            <label><input id="sam_auto" type="checkbox"> Auto extract after replies</label>
-            <label><input id="sam_global" type="checkbox"> Allow global user memory</label>
+            <label><input id="sam_enabled" type="checkbox"> 启用自动召回</label>
+            <label><input id="sam_auto" type="checkbox"> 回复后自动记忆</label>
+            <label><input id="sam_global" type="checkbox"> 允许跨角色用户记忆</label>
           </div>
 
-          <label class="sam-label">Termux backend URL
+          <label class="sam-label">Termux 后端地址
             <input id="sam_backend" class="text_pole" type="text">
           </label>
 
           <div class="sam-grid sam-numbers">
-            <label>Recall count <input id="sam_limit" class="text_pole" type="number" min="1" max="30"></label>
-            <label>Min score <input id="sam_score" class="text_pole" type="number" step="0.01" min="0" max="1"></label>
-            <label>Query messages <input id="sam_query_messages" class="text_pole" type="number" min="2" max="20"></label>
-            <label>Inject depth <input id="sam_depth" class="text_pole" type="number" min="0" max="20"></label>
+            <label>召回数量 <input id="sam_limit" class="text_pole" type="number" min="1" max="30"></label>
+            <label>最低相关度 <input id="sam_score" class="text_pole" type="number" step="0.01" min="0" max="1"></label>
+            <label>检索最近消息数 <input id="sam_query_messages" class="text_pole" type="number" min="2" max="20"></label>
+            <label>注入深度 <input id="sam_depth" class="text_pole" type="number" min="0" max="20"></label>
           </div>
 
           <div class="sam-actions">
-            <button id="sam_test" class="menu_button">Test backend</button>
-            <button id="sam_extract" class="menu_button">Extract latest turn</button>
-            <button id="sam_refresh" class="menu_button">Refresh memories</button>
-            <button id="sam_export" class="menu_button">Export</button>
-            <button id="sam_clear" class="menu_button redWarningBG">Clear current scope</button>
+            <button id="sam_test" class="menu_button">测试后端</button>
+            <button id="sam_extract" class="menu_button">提取最新一轮</button>
+            <button id="sam_refresh" class="menu_button">刷新记忆</button>
+            <button id="sam_export" class="menu_button">导出记忆</button>
+            <button id="sam_clear" class="menu_button redWarningBG">清空当前范围</button>
           </div>
 
-          <div id="sam_status" class="sam-status">not checked</div>
+          <div id="sam_status" class="sam-status">尚未检测</div>
           <div id="sam_memory_list" class="sam-memory-list"></div>
         </div>
       </div>`;
@@ -655,7 +666,7 @@ function mountUi() {
     document.getElementById('sam_refresh')?.addEventListener('click', refreshMemoryList);
     document.getElementById('sam_clear')?.addEventListener('click', clearCurrentScope);
     document.getElementById('sam_export')?.addEventListener('click', async () => {
-        try { await exportMemories(); } catch (e) { updateStatus(`export failed: ${e.message || e}`); }
+        try { await exportMemories(); } catch (e) { updateStatus(`导出失败：${e.message || e}`); }
     });
 
     setTimeout(() => {
@@ -690,7 +701,7 @@ export function onActivate() {
 
     // Some hosts mount extension settings a little later.
     setTimeout(mountUi, 1000);
-    console.info(`[AutoMemory] v${VERSION} activated`);
+    console.info(`[自动记忆] v${VERSION} 已启用`);
 }
 
 if (document.readyState === 'loading') {
