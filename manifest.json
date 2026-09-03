@@ -1,12 +1,12 @@
 {
-  "display_name": "Auto Memory (Termux)",
+  "display_name": "自动记忆（Termux）",
   "loading_order": 80,
   "requires": [],
   "optional": [],
   "js": "index.js",
   "css": "style.css",
-  "author": "OpenAI + user",
-  "version": "0.1.2",
+  "author": "OpenAI + 用户",
+  "version": "0.1.3",
   "minimum_client_version": "1.18.0",
   "generate_interceptor": "sillyAutoMemoryInterceptor",
   "hooks": {
