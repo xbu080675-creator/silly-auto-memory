@@ -1,0 +1,62 @@
+#sam_settings .sam-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 8px 12px;
+    margin: 8px 0;
+}
+#sam_settings .sam-numbers input {
+    width: 100%;
+    margin-top: 4px;
+}
+#sam_settings .sam-label {
+    display: block;
+    margin: 8px 0;
+}
+#sam_settings .sam-label input {
+    width: 100%;
+    margin-top: 4px;
+}
+#sam_settings .sam-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0;
+}
+#sam_settings .sam-status {
+    opacity: .8;
+    font-size: .9em;
+    margin: 6px 0 10px;
+}
+#sam_settings .sam-memory-list {
+    max-height: 360px;
+    overflow: auto;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+#sam_settings .sam-memory-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+#sam_settings .sam-memory-main {
+    flex: 1;
+    min-width: 0;
+}
+#sam_settings .sam-memory-meta {
+    font-size: .75em;
+    opacity: .65;
+    margin-bottom: 2px;
+}
+#sam_settings .sam-memory-summary {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+#sam_settings .sam-delete {
+    min-width: 34px;
+    padding: 4px 8px;
+}
+#sam_settings .sam-empty {
+    opacity: .7;
+    padding: 10px 0;
+}
