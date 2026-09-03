@@ -1,7 +1,7 @@
 const MODULE = 'silly_auto_memory';
 const PROMPT_ID = 'silly_auto_memory_recall';
 const META_LAST_SOURCE = 'silly_auto_memory_last_source';
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 const DEFAULTS = Object.freeze({
     enabled: true,
@@ -306,18 +306,28 @@ function parseJsonObject(raw) {
 }
 
 function buildExtractionPrompt(contextText, targetText, characterName, userName) {
-    return `You are a conservative long-term memory extractor for a roleplay/chat system.
+    return `You are a balanced automatic memory extractor for a roleplay/chat system.
 
-Extract ONLY durable or useful information newly established by TARGET TURN.
-Do not summarize the whole conversation. Do not save writing style, greetings, filler, generic knowledge, guesses, passwords, API keys, payment data, exact street addresses, or highly sensitive secrets.
+Extract information from TARGET TURN that will help maintain continuity later. Do NOT require the user to explicitly say "remember this".
+Prefer useful continuity over extreme conservatism: save important roleplay developments even when they are established naturally through narration or dialogue.
+
+Save when the turn establishes any of these:
+- a stable fact about ${userName}, ${characterName}, another named person, place, object, organization, or world setting
+- a preference, habit, boundary, goal, fear, opinion, recurring behavior, or personal rule likely to matter later
+- a relationship change, promise, conflict, reconciliation, trust change, nickname, role, or social connection
+- a meaningful event, decision, discovery, plan, possession change, injury/condition, task, location change, or scene outcome that future turns may refer back to
+- a persistent world/setting rule or character-specific rule
+- a temporary scene state that is important for near-term continuity
+
+Do not summarize the whole conversation. Do not save trivial gestures, generic filler, stylistic prose, repeated information with no change, generic knowledge, guesses presented as uncertain, passwords, API keys, payment data, exact street addresses, or highly sensitive secrets.
 
 Useful memory categories:
-- fact: stable facts about ${userName}, ${characterName}, people, places, objects
-- preference: likes/dislikes/choices that may matter later
-- relationship: relationship or trust changes between participants
-- event: important events, promises, decisions, plans, discoveries
-- rule: persistent setting/world/behavior rules explicitly established
-- state: temporary but useful current state (location, task, possession, condition)
+- fact: stable facts about ${userName}, ${characterName}, people, places, objects, organizations, or setting
+- preference: likes/dislikes/habits/boundaries/goals/opinions that may matter later
+- relationship: relationship, role, nickname, trust, conflict, affection, alliance, or social changes between participants
+- event: meaningful events, promises, decisions, plans, discoveries, outcomes, arrivals/departures, gains/losses
+- rule: persistent setting/world/behavior rules explicitly or clearly established
+- state: temporary but useful current state (location, task, possession, condition, active situation)
 
 For each memory output:
 - type: fact | preference | relationship | event | rule | state
@@ -326,13 +336,13 @@ For each memory output:
 - object: short value
 - summary: one concise standalone sentence with names resolved; no pronouns that require chat context
 - keywords: 3-10 recall terms, aliases or synonyms
-- importance: integer 1-5
+- importance: integer 1-5. Use 3 for normal continuity facts, 4 for clearly important developments, 5 only for major turning points
 - confidence: number 0-1
 - scope: "character" for information that should follow this character across chats; "chat" for branch/scene-specific state; "global" only for an explicitly universal user preference/fact
 - mode: "replace" only when this changes/invalidates the prior value of the same subject+predicate; otherwise "append"
 - ttl_days: 0 for durable memory; use 3-30 only for genuinely temporary "state"
 
-If nothing is worth remembering, output {"memories": []}.
+Usually extract 1-4 memories from a turn with meaningful continuity information. Output {"memories": []} only when the turn truly adds nothing useful for future continuity.
 Return strict JSON only, no markdown.
 
 CONTEXT BEFORE TARGET (for resolving names only):
