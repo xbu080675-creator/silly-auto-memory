@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP="$HOME/.silly-auto-memory"
-RAW="https://raw.githubusercontent.com/xbu080675-creator/silly-auto-memory/main/termux/server.js"
+RAW="https://raw.githubusercontent.com/xbu080675-creator/silly-auto-memory/53c6b8d5cf8aa9af6d1e1a98f5e98ea1907e1c79/termux/server.js"
 TMP="$APP/server.js.new"
 
 mkdir -p "$APP"
