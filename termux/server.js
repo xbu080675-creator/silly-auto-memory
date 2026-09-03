@@ -7,7 +7,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 const HOST = process.env.SILLY_MEMORY_HOST || '127.0.0.1';
 const PORT = Number(process.env.SILLY_MEMORY_PORT || 27183);
 const HOME = process.env.SILLY_MEMORY_HOME || path.join(os.homedir(), '.silly-auto-memory');
@@ -23,7 +23,7 @@ function normalizeText(s) {
     return String(s || '')
         .normalize('NFKC')
         .toLowerCase()
-        .replace(/[“”‘’"'\`~!@#$%^&*()_+\-=\[\]{};:,.<>/?\\|，。！？；：（）【】《》、]/g, ' ')
+        .replace(/[^a-z0-9\u3400-\u9fff._-]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 }
