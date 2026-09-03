@@ -81,3 +81,10 @@
     padding: 4px 0;
     line-height: 1.35;
 }
+
+
+#sam_settings .sam-recall-score {
+    opacity: .62;
+    font-size: .82em;
+    margin-left: 6px;
+}
